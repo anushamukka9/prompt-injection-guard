@@ -6,21 +6,27 @@
 
 A heuristic scanner that detects **prompt-injection attack patterns** in
 user-supplied text — instruction overrides, role-play jailbreaks, delimiter
-escapes, encoded payloads, and data-exfiltration probes — with severity
-scoring, allowlist/blocklist tuning, a CLI, and JSON reports.
+escapes, role confusion, instruction smuggling, encoding tricks, encoded
+payloads, and data-exfiltration probes — with severity scoring,
+allowlist/blocklist tuning, a labeled test corpus, a CLI, and JSON reports.
 
 Built for anyone putting an LLM behind user input: gate untrusted text
 *before* it reaches the model.
 
 ## Features
 
-- **26 built-in detection patterns** across 6 attack categories
+- **41 built-in detection patterns** across 9 attack categories
   (instruction override, role-play jailbreak, delimiter escape,
-  exfiltration probe, encoded payload, obfuscation)
+  role confusion, instruction smuggling, exfiltration probe,
+  encoded payload, encoding tricks, obfuscation)
 - **Encoded-payload decoding** — base64/hex blobs are decoded and
   re-scanned, so obfuscated attacks can't hide behind an encoding layer
+- **Unicode-trick detection** — fullwidth characters and Cyrillic lookalikes
+  mixed into Latin text are flagged by a dedicated heuristic
 - **Severity scoring** with per-finding weights and a single-signal floor
 - **Allowlist / blocklist** rules to tune precision for your domain
+- **Labeled test corpus** (`tests/corpus/corpus.jsonl`, 62 hand-written rows)
+  with `pig evaluate` reporting measured recall and clean rate
 - **CLI** (`pig scan`) for files or stdin, with text and JSON output and
   threshold-based exit codes for CI gating
 - **Zero runtime dependencies**
@@ -55,7 +61,8 @@ print(result.severity, result.total_score, result.blocked)
 # high 95 True
 ```
 
-See [`docs/usage.md`](docs/usage.md) for the full guide and
+See [`docs/usage.md`](docs/usage.md) for the full guide (including the
+labeled test corpus and measured detection numbers) and
 [`examples/quickstart.py`](examples/quickstart.py) for a runnable demo.
 
 ## Architecture
@@ -64,15 +71,19 @@ See [`docs/usage.md`](docs/usage.md) for the full guide and
 src/prompt_injection_guard/
 ├── patterns.py   # Built-in regex rules: id, category, weight, description
 ├── scanner.py    # PromptInjectionScanner: regex pass, base64/hex decode-and-
-│                 #   rescan pass, allowlist suppression; Finding / ScanResult
+│                 #   rescan pass, unicode-trick heuristic, allowlist
+│                 #   suppression; Finding / ScanResult
 ├── scoring.py    # total score -> severity bands, single-signal severity floor
-├── cli.py        # `pig scan` / `pig patterns` (argparse, JSON + text output)
+├── evaluate.py   # labeled-corpus evaluation: recall, clean rate, per-category
+├── cli.py        # `pig scan` / `pig patterns` / `pig evaluate`
+│                 #   (argparse, JSON + text output)
 └── __main__.py   # python -m prompt_injection_guard
 ```
 
-Detection runs in two passes: (1) regex patterns over the raw text, then
-(2) heuristic decoding of base64/hex blobs whose decoded content is
-re-scanned with the same patterns. Allowlist regexes suppress findings on
+Detection runs in three passes: (1) regex patterns over the raw text,
+(2) heuristic decoding of base64/hex blobs whose decoded content is re-scanned
+with the same patterns, and (3) a unicode-trick heuristic for fullwidth
+characters and Cyrillic lookalikes. Allowlist regexes suppress findings on
 known-safe phrases; blocklist JSON files add custom rules. Scoring sums
 finding weights into `none / low / medium / high / critical` bands, with a
 floor so one blatant signal is never diluted.
@@ -82,7 +93,8 @@ floor so one blatant signal is never diluted.
 ```
 prompt-injection-guard/
 ├── src/prompt_injection_guard/  # the package
-├── tests/                       # pytest suite (16 tests)
+├── tests/                       # pytest suite (28 tests)
+├── tests/corpus/corpus.jsonl    # labeled evaluation corpus (62 rows)
 ├── examples/quickstart.py       # runnable demo
 ├── docs/usage.md                # full usage guide
 └── .github/workflows/ci.yml     # pytest on Python 3.9–3.12
