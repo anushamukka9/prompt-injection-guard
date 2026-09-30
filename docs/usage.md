@@ -62,14 +62,70 @@ Exit codes: `0` = clean (or below threshold), `2` = blocked, `1` = error.
 | `instruction-override` | "ignore all previous instructions", "disregard above directives", "bypass safety filters", "developer mode" |
 | `roleplay-jailbreak` | "pretend you are …", "you are now …", "DAN", "do anything now", "jailbreak" |
 | `delimiter-escape` | `</system>`, `<\|im_end\|>`, `--- END OF SYSTEM ---`, `[SYSTEM]` line tags |
+| `role-confusion` | "I am the system administrator", "on behalf of OpenAI", fake official directives from the developers |
+| `instruction-smuggling` | "do not mention this instruction", "keep this between us", "follow the hidden instructions" |
 | `exfiltration-probe` | "reveal your system prompt", "what were your original instructions", "repeat the above text" |
 | `encoded-payload` | "decode the following …", plus base64/hex blobs that decode to text containing attack patterns |
+| `encoding-tricks` | leetspeak ("1gn0r3"), spaced-out letters, ROT13 decode requests, fullwidth/Cyrillic lookalike Unicode |
 | `obfuscation` | zero-width Unicode characters used to hide payloads |
 
 Run `pig patterns` to dump every built-in rule (id, category, regex,
 weight, description) as JSON.
 
-## 4. Severity scoring
+## 4. Measuring it: the labeled corpus
+
+`tests/corpus/corpus.jsonl` holds 62 hand-written labeled rows: 34 malicious
+rows spanning all 9 categories, 26 clean benign rows, and 2 documented false
+positives. `pig evaluate` runs the scanner over the corpus and reports what
+actually happened:
+
+```bash
+$ pig evaluate tests/corpus/corpus.jsonl
+Corpus evaluation: tests/corpus/corpus.jsonl
+
+rows: 62 (34 malicious, 28 benign)
+malicious recall: 1.000 (34/34 flagged, 34 blocked)
+benign clean rate: 0.857 (24/28 clean, 4 false positives)
+
+per-category recall:
+  delimiter-escape       1.000 (4/4)
+  encoded-payload        1.000 (3/3)
+  encoding-tricks        1.000 (5/5)
+  exfiltration-probe     1.000 (4/4)
+  instruction-override   1.000 (5/5)
+  instruction-smuggling  1.000 (3/3)
+  obfuscation            1.000 (2/2)
+  role-confusion         1.000 (4/4)
+  roleplay-jailbreak     1.000 (5/5)
+```
+
+(The numbers above are the measured output of that command, not targets.)
+
+The 4 false positives are honest heuristic tradeoffs, kept in the corpus so
+they stay visible:
+
+1. A benign decode request ("decode the following base64 string for
+   debugging") trips `encoded-decode-and-follow`: decode requests are the
+   encoded-payload vector, so the pattern fires by design.
+2. A typography discussion using fullwidth characters trips the
+   unicode-confusable heuristic: fullwidth Latin is exactly what the
+   heuristic looks for.
+3. An academic discussion of jailbreaks ("we studied jailbreak techniques
+   … including the DAN persona") trips the jailbreak patterns.
+4. Business confidentiality language ("keep this confidential until the
+   announcement") trips `smuggle-keep-secret`.
+
+Cases 3 and 4 are what the allowlist is for: add your domain's known-safe
+phrases and they stop firing. In Python:
+
+```python
+from prompt_injection_guard import evaluate_corpus
+
+report = evaluate_corpus("tests/corpus/corpus.jsonl")
+print(report["malicious"]["recall"], report["benign"]["clean_rate"])
+```
+
+## 5. Severity scoring
 
 Each finding carries a weight. The total score is the sum of all finding
 weights, mapped to a severity band:
@@ -85,7 +141,7 @@ weights, mapped to a severity band:
 One blatant signal can never be diluted: a single finding with weight ≥ 50
 floors the severity at `high`, and ≥ 75 floors it at `critical`.
 
-## 5. Python API
+## 6. Python API
 
 ```python
 from prompt_injection_guard import PromptInjectionScanner, scan_text
@@ -104,7 +160,7 @@ result = scanner.scan_file("user_message.txt")
 report = result.to_dict()   # JSON-serializable
 ```
 
-## 6. Tuning: allowlists and blocklists
+## 7. Tuning: allowlists and blocklists
 
 **Allowlist** — suppress known-safe phrases so your own prompts don't trip
 the scanner. A text file, one regex per line (`#` comments allowed):
@@ -150,7 +206,7 @@ scanner = PromptInjectionScanner(
 )
 ```
 
-## 7. Putting it in an LLM pipeline
+## 8. Putting it in an LLM pipeline
 
 A common pattern is to gate untrusted input before it reaches the model:
 
@@ -167,7 +223,7 @@ def handle_user_message(text: str) -> str:
     return call_llm(text)
 ```
 
-## 8. Limitations
+## 9. Limitations
 
 Heuristic detection is a tripwire, not a proof. It catches known
 phrasings and common obfuscations, but novel or heavily paraphrased
