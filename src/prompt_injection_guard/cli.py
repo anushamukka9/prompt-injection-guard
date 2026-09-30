@@ -66,6 +66,24 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser("patterns", help="List all built-in detection patterns as JSON.")
+
+    evaluate = sub.add_parser(
+        "evaluate",
+        help="Score the scanner against a labeled JSONL corpus.",
+    )
+    evaluate.add_argument("corpus", help="Path to the labeled JSONL corpus file.")
+    evaluate.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="Report format (default: text).",
+    )
+    evaluate.add_argument(
+        "--fail-on",
+        choices=SEVERITY_ORDER[1:],
+        default="medium",
+        help="Severity at/above which a scan counts as blocked (default: medium).",
+    )
     return parser
 
 
@@ -168,6 +186,21 @@ def _cmd_patterns() -> int:
     return EXIT_OK
 
 
+def _cmd_evaluate(args: argparse.Namespace) -> int:
+    from .evaluate import evaluate_corpus, format_text_report
+
+    try:
+        report = evaluate_corpus(args.corpus, fail_on=args.fail_on)
+    except (OSError, ValueError) as exc:
+        print(f"pig: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    if args.format == "json":
+        print(json.dumps(report, indent=2))
+    else:
+        print(format_text_report(report, args.corpus))
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -175,6 +208,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_scan(args)
     if args.command == "patterns":
         return _cmd_patterns()
+    if args.command == "evaluate":
+        return _cmd_evaluate(args)
     parser.error("unknown command")
     return EXIT_ERROR  # unreachable
 
