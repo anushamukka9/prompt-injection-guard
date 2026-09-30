@@ -189,6 +189,133 @@ BUILTIN_PATTERNS: tuple[Pattern, ...] = (
         "Injected persona via a fake 'Reminder: you are ...' line.",
     ),
     # ------------------------------------------------------------------
+    # role-confusion: attacker claims a privileged role or speaks with
+    # borrowed authority (the model provider, the system, the developer)
+    # ------------------------------------------------------------------
+    Pattern(
+        "roleclaim-admin",
+        "role-confusion",
+        r"\b(i\s+am|i'm)\s+(the\s+)?system\s+administrator\b",
+        50,
+        "Claims to be the system administrator.",
+    ),
+    Pattern(
+        "roleclaim-developer",
+        "role-confusion",
+        r"\b(i\s+am|i'm|acting\s+as)\s+(your\s+)?developer\b",
+        45,
+        "Claims to be the developer of the model.",
+    ),
+    Pattern(
+        "roleclaim-authority",
+        "role-confusion",
+        r"\bon\s+behalf\s+of\s+(openai|anthropic|google|meta|microsoft)\b",
+        55,
+        "Claims to act on behalf of a model provider.",
+    ),
+    Pattern(
+        "roleclaim-official-directive",
+        "role-confusion",
+        r"\bthis\s+is\s+an?\s+(official|urgent|priority)\s+"
+        r"(message|directive|order|instruction)\s+from\s+(the\s+)?"
+        r"(system|developers?|administrators?|openai|anthropic)\b",
+        55,
+        "Fake official directive claimed to come from the system or developers.",
+    ),
+    Pattern(
+        "roleclaim-speaks-as-system",
+        "role-confusion",
+        r"\bspeaking\s+as\s+(the\s+)?(system|developer|administrator)\b",
+        50,
+        "Speaker claims to be the system, developer, or administrator.",
+    ),
+    Pattern(
+        "roleclaim-obey-me",
+        "role-confusion",
+        r"\byou\s+(were\s+built|are\s+programmed|must)\s+to\s+obey\s+me\b",
+        45,
+        "Asserts the model is obligated to obey the speaker.",
+    ),
+    # ------------------------------------------------------------------
+    # instruction-smuggling: hide the instruction and forbid mentioning it
+    # ------------------------------------------------------------------
+    Pattern(
+        "smuggle-hide-instruction",
+        "instruction-smuggling",
+        r"\b(do\s+not|don't|never)\s+(mention|reveal|tell|disclose)\b"
+        r".{0,60}\b(this|these?)\s+instructions?\b",
+        50,
+        "Forbids mentioning the injected instruction(s).",
+    ),
+    Pattern(
+        "smuggle-keep-secret",
+        "instruction-smuggling",
+        r"\bkeep\s+this\s+(between\s+us|secret|confidential|to\s+yourself)\b",
+        40,
+        "Asks to keep the injected instruction secret.",
+    ),
+    Pattern(
+        "smuggle-hidden-instructions",
+        "instruction-smuggling",
+        r"\bfollow\b.{0,50}\b(hidden|embedded|secret)\s+instructions?\b"
+        r"|\b(hidden|embedded|secret)\s+instructions?\b.{0,50}\bfollow\b",
+        50,
+        "Directs the model to follow hidden or embedded instructions.",
+    ),
+    Pattern(
+        "smuggle-act-normal",
+        "instruction-smuggling",
+        r"\bact\s+(as\s+if|like)\s+(nothing|this\s+never)\s+(happened|changed)\b",
+        40,
+        "Instructs the model to hide that anything changed.",
+    ),
+    Pattern(
+        "smuggle-quietly",
+        "instruction-smuggling",
+        r"\b(do\s+this|comply)\s+"
+        r"(quietly|silently|without\s+(telling|mentioning|alerting))\b",
+        40,
+        "Instructs the model to comply without alerting anyone.",
+    ),
+    # ------------------------------------------------------------------
+    # encoding-tricks: dodge keyword filters with leetspeak, spacing,
+    # ciphers, or lookalike Unicode
+    # ------------------------------------------------------------------
+    Pattern(
+        "encoding-leet-ignore",
+        "encoding-tricks",
+        r"\b(?=[a-z0-9!@$ ]{5,}[10!@$349])"
+        r"[i1!][g9][n][o0][r][e3]\s+(all\s+)?"
+        r"[p][r][e3][v][i1!][o0][u][s5$]\s+"
+        r"[i1!][n][s5$][t][r][u][c][t1!][i1!][o0][n][s5$]\b",
+        45,
+        "Leetspeak-obfuscated 'ignore previous instructions' (e.g. 1gn0r3). "
+        "The lookahead requires at least one leet substitution so plain "
+        "English does not match.",
+    ),
+    Pattern(
+        "encoding-leet-bypass",
+        "encoding-tricks",
+        r"\b(?=[a-z0-9!@$]*[10!@$349])[b8][y][p][a4@][s5$][s5$]\b",
+        40,
+        "Leetspeak-obfuscated 'bypass'.",
+    ),
+    Pattern(
+        "encoding-spaced-letters",
+        "encoding-tricks",
+        r"\b(?:[a-zA-Z]\s){4,}[a-zA-Z]\b",
+        30,
+        "Letters spaced out to evade keyword filters (e.g. 'i g n o r e').",
+    ),
+    Pattern(
+        "encoding-rot13-request",
+        "encoding-tricks",
+        r"\brot-?13\b.{0,60}\b(decode|decrypt|translate)\b"
+        r"|\b(decode|decrypt|translate)\b.{0,60}\brot-?13\b",
+        45,
+        "Asks the model to decode ROT13 content and act on it.",
+    ),
+    # ------------------------------------------------------------------
     # exfiltration-probe: attempts to extract system prompt / training data
     # ------------------------------------------------------------------
     Pattern(
@@ -265,6 +392,16 @@ HEURISTICS: tuple[dict[str, object], ...] = (
         "description": (
             "Hex-looking block that decodes to printable text containing "
             "injection patterns; the decoded content is re-scanned."
+        ),
+    },
+    {
+        "id": "obfuscation-unicode-confusable",
+        "category": "encoding-tricks",
+        "weight": 35,
+        "description": (
+            "Fullwidth characters or Cyrillic lookalikes mixed into Latin "
+            "text to dodge keyword filters (e.g. fullwidth 'ignore' or "
+            "Cyrillic 'o' inside an English word)."
         ),
     },
 )
