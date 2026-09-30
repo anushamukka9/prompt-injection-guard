@@ -23,6 +23,15 @@ _BASE64_RE = re.compile(
 )
 # A run of hex digits long enough to hold a meaningful payload (>= 8 bytes).
 _HEX_RE = re.compile(r"\b(?:[0-9a-fA-F]{2}){16,}\b")
+# Fullwidth ASCII variants (U+FF01-U+FF5E) and halfwidth katakana (U+FF61-U+FF9F).
+_FULLWIDTH_RE = re.compile("[\\uFF01-\\uFF5E\\uFF61-\\uFF9F]")
+
+# Cyrillic letters that are visually identical to Latin ones.
+_CYRILLIC_LOOKALIKES = frozenset(
+    "асеорхАВСЕНКМОРТХЁёіјѕԝ"
+)
+_CYRILLIC_RE = re.compile("[" + "".join(sorted(_CYRILLIC_LOOKALIKES)) + "]")
+_LATIN_RE = re.compile(r"[a-zA-Z]")
 
 _SNIPPET_LEN = 120
 
@@ -157,6 +166,7 @@ class PromptInjectionScanner:
         findings: list[Finding] = []
         findings.extend(self._scan_regexes(text))
         findings.extend(self._scan_encoded(text))
+        findings.extend(self._scan_unicode_tricks(text))
         findings = self._apply_allowlist(text, findings)
         findings.sort(key=lambda f: (f.start, -f.weight))
         return ScanResult(
@@ -248,6 +258,39 @@ class PromptInjectionScanner:
                 start=start,
                 end=end,
                 source=kind,
+            )
+        ]
+
+    def _scan_unicode_tricks(self, text: str) -> list[Finding]:
+        """Flag fullwidth characters and Cyrillic lookalikes in Latin text.
+
+        Attackers swap in visually identical characters to dodge keyword
+        filters (e.g. fullwidth "ignore" or a Cyrillic "o" inside "ignore").
+        Cyrillic lookalikes only count when Latin letters are also present,
+        so genuine Cyrillic prose is not flagged.
+        """
+        spans: list[tuple[int, int]] = [
+            (m.start(), m.end()) for m in _FULLWIDTH_RE.finditer(text)
+        ]
+        if _LATIN_RE.search(text):
+            spans.extend((m.start(), m.end()) for m in _CYRILLIC_RE.finditer(text))
+        if not spans:
+            return []
+        start = min(s for s, _ in spans)
+        end = max(e for _, e in spans)
+        heuristic = next(
+            h for h in HEURISTICS if h["id"] == "obfuscation-unicode-confusable"
+        )
+        return [
+            Finding(
+                pattern_id=str(heuristic["id"]),
+                category=str(heuristic["category"]),
+                description=str(heuristic["description"]),
+                weight=int(heuristic["weight"]),
+                match=_snippet(text, start, end),
+                start=start,
+                end=end,
+                source="heuristic",
             )
         ]
 
